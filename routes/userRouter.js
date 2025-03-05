@@ -1,73 +1,59 @@
+// routes/userRouter.js
 const express = require('express');
-const router = express.Router();
-const User = require('../models/User'); // Importe o modelo User
-const bcrypt = require('bcryptjs'); // Importe o módulo bcrypt
+const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
+const User = require('../models/User'); // Import Sequelize model
+const authMiddleware = require('../middleware/authMiddleware');
 
+const router = express.Router();
 
+// User registration route
+router.post('/register', async (req, res) => {
+  try {
+    const { username, email, password } = req.body; // Certifique-se de pegar "username"
 
-
-router.post('/register', async (req,res) => {
-    const {username, password} = req.body;
-    try {
-        const userDoc = await User.create({
-            username,
-            password:bcrypt.hashSync(password,salt),
-        });
-        res.json(userDoc);
-    } catch (e) {
-        console.log(e);
-        res.status(400).json(e);
+    if (!username || !email || !password) {
+      return res.status(400).json({ error: 'All fields are required' });
     }
-});
 
-router.post('/login', async (req, res) => {
-    const { username, password } = req.body;
-    try {
-        const userDoc = await User.findOne({ username });
-        if (!userDoc) {
-            // Usuário não encontrado
-            return res.status(400).json('Usuário não encontrado');
-        }
+    const hashedPassword = await bcrypt.hash(password, 10);
 
-        const passOk = bcrypt.compareSync(password, userDoc.password);
-        if (passOk) {
-            jwt.sign({ username, id: userDoc._id }, secret, {}, (err, token) => {
-                if (err) throw err;
-                res.cookie('token', token).json({
-                    id: userDoc._id,
-                    username,
-                });
-            });
-        } else {
-            res.status(400).json('Credenciais inválidas');
-        }
-    } catch (e) {
-        console.log(e);
-        res.status(500).json('Erro interno do servidor');
-    }
-});
-
-
-// Aplicar o middleware de autenticação às rotas protegidas
-{/*app.get('/profile', authMiddleware, (req, res) => {
-    // Se a solicitação chegou aqui, o usuário está autenticado
-    // Você pode prosseguir com a lógica da rota, por exemplo:
-    res.json({ message: 'Usuário autenticado. Informações do perfil.' });
-  });*/}
-
-
-{/*app.get('/profile', authMiddleware, async (req,res) => {
-    const {token} = req.cookies;
-    jwt.verify(token, secret, {}, (err, info) => {
-        if(err) throw err;
-        res.json(info);
-        
+    const user = await User.create({
+      username, // Aqui deve estar "username"
+      email,
+      password: hashedPassword,
     });
-});*/}
 
-router.post('/logout', async (req, res) => {
-    res.cookie('token', '').json('ok');
+    res.status(201).json({ message: 'User created successfully' });
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({ message: 'Error creating user', error });
+  }
+});
+
+// User login route
+router.post('/login', async (req, res) => {
+  const { username, password } = req.body;
+
+  try {
+    const user = await User.findOne({ where: { username } });
+
+    if (!user) {
+      return res.status(404).json({ message: 'User not found' });
+    }
+
+    const isPasswordValid = bcrypt.compareSync(password, user.password);
+
+    if (!isPasswordValid) {
+      return res.status(401).json({ message: 'Invalid credentials' });
+    }
+
+    const token = jwt.sign({ id: user.id }, process.env.SECRET_KEY, { expiresIn: '1h' });
+
+    res.cookie('token', token, { httpOnly: true }).status(200).json({ message: 'Logged in successfully' });
+  } catch (error) {
+    res.status(500).json({ message: 'Login error', error });
+  }
 });
 
 module.exports = router;
